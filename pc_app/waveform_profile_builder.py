@@ -1739,3 +1739,18 @@ if __name__ == "__main__":
     """
     app = ProfileBuilderApp()
     app.mainloop()
+
+
+def main():
+    """
+    Entry point for console script.
+    
+    This function is called when running 'profile-builder' from command line
+    after installation via pip.
+    """
+    app = ProfileBuilderApp()
+    app.mainloop()
+
+
+if __name__ == "__main__":
+    main()
