@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-01-20
+
+### Added
+- **Auxiliary GPIO Output System**: Dynamic user-defined outputs for power supplies, relays, etc.
+  - Configure named outputs with GPIO assignments
+  - Each output generates "{Name} On" and "{Name} Off" events
+  - Enable/disable outputs without removing them
+  - Add/remove outputs dynamically in GUI
+  - Default configuration includes Power Supply 1 and Power Supply 2
+  - See [AUXILIARY_OUTPUTS.md](AUXILIARY_OUTPUTS.md) for complete documentation
+- **Dynamic Event Generation**: Event dropdowns automatically update based on auxiliary outputs
+- **Auxiliary Waveforms**: Separate waveform generation for each auxiliary output
+  - Digital step functions for GPIO control
+  - Time-synchronized with block execution
+  - Saved in profile JSON for hardware execution
+- **Backward Compatibility**: Profiles without auxiliary outputs load correctly
+
+### Changed
+- `build_waveforms_from_blocks()` now returns 9-tuple (added auxiliary_waveforms dict)
+- Profile dataclass extended with `auxiliary_outputs` and `auxiliary_waveforms` fields
+- Event validation removed in profile loading to support dynamic auxiliary events
+
+### Fixed
+- Import error: Changed `ttkbootstrap.widgets.scrolled` to `ttkbootstrap.scrolled`
+
 ## [2.0.0] - 2026-01-20
 
 ### Added
