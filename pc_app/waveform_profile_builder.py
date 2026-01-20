@@ -56,7 +56,7 @@ from tkinter import filedialog, messagebox
 
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
-from ttkbootstrap.widgets.scrolled import ScrolledFrame
+from ttkbootstrap.scrolled import ScrolledFrame
 
 # ----------------------------
 # Matplotlib Imports (for waveform visualization)
@@ -215,6 +215,12 @@ class ProfileBuilderApp(tb.Window):
         self.pos_offset_vars: List[tk.DoubleVar] = []        # DUT time offsets
         
         # ----------------------------
+        # Auxiliary Outputs Configuration
+        # ----------------------------
+        # List of auxiliary outputs: (name_var, gpio_var, enabled_var, frame)
+        self.auxiliary_outputs: List[Tuple[tk.StringVar, tk.IntVar, tk.BooleanVar, tb.Frame]] = []
+        
+        # ----------------------------
         # Pico Serial Communication
         # ----------------------------
         self.pico = PicoLink()                                  # Serial communication handler
@@ -234,6 +240,7 @@ class ProfileBuilderApp(tb.Window):
         # ----------------------------
         self._build_layout()         # Create all GUI widgets
         self._init_positions()       # Initialize position configuration widgets
+        self._init_auxiliary_outputs()  # Initialize auxiliary outputs with defaults
         
         # Create a default block with starter example
         self._add_block("Main Test", cycles=1)
@@ -439,6 +446,37 @@ class ProfileBuilderApp(tb.Window):
         self._labeled_entry(apply_box, "Row delay between positions (ms):", self.row_delay_ms)
 
         # ===========================
+        # Auxiliary Outputs Configuration
+        # ===========================
+        aux_box = tb.Labelframe(left, text="Auxiliary Outputs (Power Supplies, Relays, etc.)", padding=10)
+        aux_box.pack(fill=X, pady=(0, 10))
+        
+        # Instructions
+        inst_label = tb.Label(aux_box, text="Define named outputs. Each generates '{Name} On' and '{Name} Off' events.",
+                              font=("Arial", 8), foreground="gray")
+        inst_label.pack(anchor=W, pady=(0, 5))
+        
+        # Column headers
+        aux_header = tb.Frame(aux_box)
+        aux_header.pack(fill=X, pady=(0, 4))
+        tb.Label(aux_header, text="Enabled", width=8).pack(side=LEFT)
+        tb.Label(aux_header, text="Name", width=20).pack(side=LEFT)
+        tb.Label(aux_header, text="GPIO", width=8).pack(side=LEFT)
+        
+        # Scrollable container for auxiliary output rows
+        self.aux_scroll = ScrolledFrame(aux_box, autohide=True, height=100)
+        self.aux_scroll.pack(fill=BOTH, expand=YES, pady=(0, 5))
+        
+        self.aux_container = tb.Frame(self.aux_scroll)
+        self.aux_container.pack(fill=BOTH, expand=YES)
+        
+        # Add/Remove buttons
+        aux_btn_frame = tb.Frame(aux_box)
+        aux_btn_frame.pack(fill=X)
+        tb.Button(aux_btn_frame, text="+ Add Output", bootstyle=SUCCESS, command=self._add_auxiliary_output).pack(side=LEFT, padx=(0, 5))
+        tb.Button(aux_btn_frame, text="- Remove", bootstyle=DANGER, command=self._remove_last_auxiliary_output).pack(side=LEFT)
+
+        # ===========================
         # Position Configuration Grid
         # ===========================
         pos_frame = tb.Labelframe(left, text="Positions", padding=10)
@@ -560,8 +598,11 @@ class ProfileBuilderApp(tb.Window):
         
         The row is stored in self.schedule_rows for later access and deletion.
         """
+        # Get available events (base + auxiliary)
+        available_events = self._get_available_events()
+        
         # Create Tkinter variables for this row
-        ev_var = tk.StringVar(value=default_event or EVENTS[0])
+        ev_var = tk.StringVar(value=default_event or available_events[0] if available_events else EVENTS[0])
         st_var = tk.DoubleVar(value=float(start))
         du_var = tk.DoubleVar(value=float(duration))
 
@@ -570,7 +611,7 @@ class ProfileBuilderApp(tb.Window):
         row.pack(fill=X, pady=2)
 
         # Event type dropdown
-        cb = tb.Combobox(row, textvariable=ev_var, values=EVENTS, state="readonly", width=22)
+        cb = tb.Combobox(row, textvariable=ev_var, values=available_events, state="readonly", width=22)
         cb.pack(side=LEFT)
 
         # Start time entry
@@ -716,6 +757,178 @@ class ProfileBuilderApp(tb.Window):
         events: List[ScheduledEvent] = []
         for ev_var, st_var, du_var, _frame in self.schedule_rows:
             events.append(ScheduledEvent(ev_var.get(), float(st_var.get()), float(du_var.get())))
+        return events
+
+    # ===========================
+    # Auxiliary Output Management Methods
+    # ===========================
+
+    def _init_auxiliary_outputs(self):
+        """
+        Initialize auxiliary outputs with defaults from config.
+        
+        Creates auxiliary output rows for each default output defined
+        in config.DEFAULT_AUXILIARY_OUTPUTS.
+        """
+        from config import DEFAULT_AUXILIARY_OUTPUTS
+        
+        # Clear any existing auxiliary widgets
+        for _name_var, _gpio_var, _enabled_var, frame in self.auxiliary_outputs:
+            frame.destroy()
+        self.auxiliary_outputs.clear()
+        
+        # Add default auxiliary outputs
+        for name, gpio in DEFAULT_AUXILIARY_OUTPUTS:
+            self._add_auxiliary_output(name=name, gpio=gpio, enabled=True)
+
+    def _add_auxiliary_output(self, name: str = None, gpio: int = None, enabled: bool = True):
+        """
+        Add a new auxiliary output row to the configuration.
+        
+        Args:
+            name (str, optional): Name of the output. Defaults to "Aux N"
+            gpio (int, optional): GPIO pin number. Defaults to next available
+            enabled (bool, optional): Whether output is enabled. Defaults to True
+        
+        Creates a row with:
+        - Enable checkbox
+        - Name entry
+        - GPIO entry
+        
+        Each output generates two events: "{Name} On" and "{Name} Off"
+        """
+        from config import DEFAULT_AUXILIARY_GPIO_START
+        
+        # Auto-generate name if not provided
+        if name is None:
+            name = f"Aux {len(self.auxiliary_outputs) + 1}"
+        
+        # Auto-assign GPIO if not provided
+        if gpio is None:
+            gpio = DEFAULT_AUXILIARY_GPIO_START + len(self.auxiliary_outputs)
+        
+        # Create variables
+        name_var = tk.StringVar(value=name)
+        gpio_var = tk.IntVar(value=gpio)
+        enabled_var = tk.BooleanVar(value=enabled)
+        
+        # Create row frame
+        row = tb.Frame(self.aux_container)
+        row.pack(fill=X, pady=1)
+        
+        # Enable checkbox
+        tb.Checkbutton(row, variable=enabled_var, command=self._on_auxiliary_changed, width=8).pack(side=LEFT)
+        
+        # Name entry
+        name_entry = tb.Entry(row, textvariable=name_var, width=20)
+        name_entry.pack(side=LEFT, padx=(0, 5))
+        name_entry.bind("<FocusOut>", lambda _e: self._on_auxiliary_changed())
+        name_entry.bind("<Return>", lambda _e: self._on_auxiliary_changed())
+        
+        # GPIO entry
+        gpio_entry = tb.Entry(row, textvariable=gpio_var, width=8)
+        gpio_entry.pack(side=LEFT)
+        gpio_entry.bind("<FocusOut>", lambda _e: self._on_auxiliary_changed())
+        gpio_entry.bind("<Return>", lambda _e: self._on_auxiliary_changed())
+        
+        # Store row data
+        self.auxiliary_outputs.append((name_var, gpio_var, enabled_var, row))
+        
+        # Update available events
+        self._on_auxiliary_changed()
+
+    def _remove_last_auxiliary_output(self):
+        """
+        Remove the last auxiliary output from the configuration.
+        """
+        if not self.auxiliary_outputs:
+            return
+        
+        # Get and remove last row
+        _name_var, _gpio_var, _enabled_var, frame = self.auxiliary_outputs.pop()
+        frame.destroy()
+        
+        # Update available events
+        self._on_auxiliary_changed()
+
+    def _get_auxiliary_outputs(self) -> List:
+        """
+        Extract auxiliary outputs from GUI widgets.
+        
+        Returns:
+            List[AuxiliaryOutput]: List of all auxiliary output configurations
+        """
+        from models import AuxiliaryOutput
+        
+        outputs = []
+        for name_var, gpio_var, enabled_var, _frame in self.auxiliary_outputs:
+            outputs.append(
+                AuxiliaryOutput(
+                    name=name_var.get().strip(),
+                    gpio=int(gpio_var.get()),
+                    enabled=bool(enabled_var.get())
+                )
+            )
+        return outputs
+
+    def _on_auxiliary_changed(self):
+        """
+        Handle auxiliary output changes.
+        
+        This method:
+        1. Updates available events in all schedule comboboxes
+        2. Rebuilds waveform preview
+        """
+        # Update event lists in all schedule rows
+        self._update_event_lists()
+        
+        # Rebuild preview
+        self._rebuild_and_preview()
+
+    def _update_event_lists(self):
+        """
+        Update the event dropdown lists in all schedule rows to include auxiliary events.
+        
+        Dynamically generates event list based on enabled auxiliary outputs.
+        Each enabled output adds two events: "{Name} On" and "{Name} Off"
+        """
+        # Get base events
+        events = list(EVENTS)
+        
+        # Add auxiliary events
+        for name_var, _gpio_var, enabled_var, _frame in self.auxiliary_outputs:
+            if enabled_var.get():
+                name = name_var.get().strip()
+                if name:
+                    events.append(f"{name} On")
+                    events.append(f"{name} Off")
+        
+        # Update all schedule row comboboxes
+        for ev_var, _st_var, _du_var, frame in self.schedule_rows:
+            # Find the combobox widget in this row
+            for widget in frame.winfo_children():
+                if isinstance(widget, tb.Combobox):
+                    widget.configure(values=events)
+                    break
+
+    def _get_available_events(self) -> List[str]:
+        """
+        Get list of available events including base events and auxiliary events.
+        
+        Returns:
+            List[str]: All available event types
+        """
+        # Start with base events
+        events = list(EVENTS)
+        
+        # Add auxiliary events for enabled outputs
+        for name_var, _gpio_var, enabled_var, _frame in self.auxiliary_outputs:
+            if enabled_var.get():
+                name = name_var.get().strip()
+                if name:
+                    events.append(f"{name} On")
+                    events.append(f"{name} Off")
+        
         return events
 
     # ===========================
@@ -1029,13 +1242,16 @@ class ProfileBuilderApp(tb.Window):
         # Get current settings from GUI
         unit = self.waveform_unit.get()
         blocks = self._get_blocks()
+        auxiliary_outputs = self._get_auxiliary_outputs()
 
         # Generate waveforms using waveform_engine (for all blocks)
         try:
             (self.iso_digital, self.dut_digital,
              self.iso_display, self.dut_display,
              self.iso_has_ramps, self.dut_has_ramps,
-             self.total_length_ms, self.block_end_times) = build_waveforms_from_blocks(blocks, unit)
+             self.total_length_ms, self.block_end_times, self.auxiliary_waveforms) = build_waveforms_from_blocks(
+                blocks, unit, auxiliary_outputs=auxiliary_outputs
+            )
         except Exception as e:
             # Display error and abort preview
             self.summary_lbl.config(text=f"Waveform error: {e}")
@@ -1152,11 +1368,14 @@ class ProfileBuilderApp(tb.Window):
         if not blocks:
             raise ValueError("Add at least one block.")
 
-        # Get time unit
+        # Get time unit and auxiliary outputs
         unit = self.waveform_unit.get()
+        auxiliary_outputs = self._get_auxiliary_outputs()
 
         # Generate waveforms for all blocks (raises ValueError if any block is invalid)
-        iso_dig, dut_dig, *_ = build_waveforms_from_blocks(blocks, unit)
+        iso_dig, dut_dig, _, _, _, _, _, _, aux_waveforms = build_waveforms_from_blocks(
+            blocks, unit, auxiliary_outputs=auxiliary_outputs
+        )
 
         # Construct and return Profile object
         return Profile(
@@ -1167,6 +1386,8 @@ class ProfileBuilderApp(tb.Window):
             dut_waveform_points=[(float(t), int(s)) for t, s in dut_dig],
             row_delay_ms=float(self.row_delay_ms.get()),
             positions=positions,
+            auxiliary_outputs=auxiliary_outputs,
+            auxiliary_waveforms=aux_waveforms,
         )
 
     def _profile_to_json_text(self, prof: Profile) -> str:
@@ -1195,6 +1416,7 @@ class ProfileBuilderApp(tb.Window):
         # Explicitly convert nested dataclasses to dicts
         data["positions"] = [asdict(p) for p in prof.positions]
         data["scheduled_events"] = [asdict(ev) for ev in prof.scheduled_events]
+        data["auxiliary_outputs"] = [asdict(aux) for aux in prof.auxiliary_outputs] if prof.auxiliary_outputs else []
         
         # Return pretty-printed JSON
         return json.dumps(data, indent=2)
@@ -1354,9 +1576,7 @@ class ProfileBuilderApp(tb.Window):
                         start = float(ev.get("start", 0.0))
                         duration = float(ev.get("duration", 0.0))
                         
-                        # Validate event type
-                        if event not in EVENTS:
-                            raise ValueError(f"Unknown event in block '{block_name}': {event}")
+                        # Note: Event type not validated here to allow auxiliary events
                         
                         self._add_schedule_row(event, start, duration)
                 
@@ -1391,9 +1611,7 @@ class ProfileBuilderApp(tb.Window):
                     start = float(ev.get("start", 0.0))
                     duration = float(ev.get("duration", 0.0))
                     
-                    # Validate event type
-                    if event not in EVENTS:
-                        raise ValueError(f"Unknown event in file: {event}")
+                    # Note: Event type not validated here to allow auxiliary events
                     
                     self._add_schedule_row(event, start, duration)
 
@@ -1418,6 +1636,20 @@ class ProfileBuilderApp(tb.Window):
                     self.pos_iso_gpio_vars[i].set(int(p.get("isolator_gpio", i + 1)))
                     self.pos_dut_gpio_vars[i].set(int(p.get("dut_gpio", 21 + i)))
                     self.pos_offset_vars[i].set(float(p.get("dut_offset_ms", 0.0)))
+
+            # Load auxiliary outputs (with backward compatibility)
+            aux_list = data.get("auxiliary_outputs", [])
+            if aux_list and isinstance(aux_list, list):
+                # Clear existing auxiliary outputs
+                while self.auxiliary_outputs:
+                    self._remove_last_auxiliary_output()
+                
+                # Load each auxiliary output
+                for aux in aux_list:
+                    name = aux.get("name", "Aux")
+                    gpio = int(aux.get("gpio", 15))
+                    enabled = bool(aux.get("enabled", True))
+                    self._add_auxiliary_output(name=name, gpio=gpio, enabled=enabled)
 
         except Exception as e:
             messagebox.showerror("Load Error", f"Profile format error:\n{e}")
