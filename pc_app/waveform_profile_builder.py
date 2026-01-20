@@ -172,6 +172,7 @@ class ProfileBuilderApp(tb.Window):
         self.profile_name = tk.StringVar(value="New Profile")
         self.waveform_unit = tk.StringVar(value="ms")  # Time unit: ms, sec, or min
         self.row_delay_ms = tk.DoubleVar(value=0.0)    # Delay between positions
+        self.preview_mode = tk.StringVar(value="All Blocks")  # Preview mode: "All Blocks" or "Current Block"
         
         # ----------------------------
         # Block Management
@@ -308,6 +309,12 @@ class ProfileBuilderApp(tb.Window):
         unit_combo = tb.Combobox(top, textvariable=self.waveform_unit, values=["ms", "sec", "min"], width=6, state="readonly")
         unit_combo.pack(side=LEFT, padx=(5, 15))
         unit_combo.bind("<<ComboboxSelected>>", lambda e: self._rebuild_and_preview())
+
+        # Preview mode selector
+        tb.Label(top, text="Preview:").pack(side=LEFT)
+        preview_combo = tb.Combobox(top, textvariable=self.preview_mode, values=["All Blocks", "Current Block"], width=12, state="readonly")
+        preview_combo.pack(side=LEFT, padx=(5, 15))
+        preview_combo.bind("<<ComboboxSelected>>", lambda e: self._rebuild_and_preview())
 
         # Current block indicator
         self.current_block_label = tb.Label(top, text="Block: None", font=("Arial", 10, "bold"))
@@ -1241,10 +1248,17 @@ class ProfileBuilderApp(tb.Window):
 
         # Get current settings from GUI
         unit = self.waveform_unit.get()
-        blocks = self._get_blocks()
+        all_blocks = self._get_blocks()
         auxiliary_outputs = self._get_auxiliary_outputs()
+        
+        # Filter blocks based on preview mode
+        preview_mode = self.preview_mode.get()
+        if preview_mode == "Current Block" and 0 <= self.current_block_index < len(all_blocks):
+            blocks = [all_blocks[self.current_block_index]]
+        else:
+            blocks = all_blocks
 
-        # Generate waveforms using waveform_engine (for all blocks)
+        # Generate waveforms using waveform_engine
         try:
             (self.iso_digital, self.dut_digital,
              self.iso_display, self.dut_display,
@@ -1275,13 +1289,15 @@ class ProfileBuilderApp(tb.Window):
         # Count enabled positions and total cycles
         enabled_count = sum(1 for p in positions if p.enabled)
         total_cycles = sum(b.cycles for b in blocks)
+        preview_mode = self.preview_mode.get()
+        preview_note = f"Previewing: {preview_mode}"
 
         # Update summary text
         self.summary_lbl.config(
             text=(
                 f"Units: {unit} | Blocks: {len(blocks)} | Total Cycles: {total_cycles} | Total Length: {self.total_length_ms:.1f} ms\n"
                 f"Enabled positions: {enabled_count} | Row delay: {self.row_delay_ms.get()} ms\n"
-                f"Blocks execute sequentially. Cycle Delay in last cycle of each block is skipped."
+                f"{preview_note} | Blocks execute sequentially. Cycle Delay in last cycle of each block is skipped."
             )
         )
 
@@ -1946,6 +1962,20 @@ class ProfileBuilderApp(tb.Window):
             messagebox.showerror("Pico Stop Error", str(e))
         finally:
             self._update_pico_button_states()
+
+
+    def _on_closing(self):
+        """
+        Handle window close event - saves theme preference.
+        """
+        import os
+        try:
+            theme_file = os.path.join(os.path.dirname(__file__), ".theme_preference")
+            with open(theme_file, "w") as f:
+                f.write(self.style.theme.name)
+        except:
+            pass
+        self.destroy()
 
 
 # ================================
