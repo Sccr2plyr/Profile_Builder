@@ -48,3 +48,6 @@ debug_log.txt
 # Temporary files
 *.tmp
 *.bak
+
+# User preferences
+pc_app/.theme_preference
