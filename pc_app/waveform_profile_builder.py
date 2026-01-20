@@ -1415,7 +1415,7 @@ class ProfileBuilderApp(tb.Window):
         
         # Explicitly convert nested dataclasses to dicts
         data["positions"] = [asdict(p) for p in prof.positions]
-        data["scheduled_events"] = [asdict(ev) for ev in prof.scheduled_events]
+        data["blocks"] = [asdict(b) for b in prof.blocks]
         data["auxiliary_outputs"] = [asdict(aux) for aux in prof.auxiliary_outputs] if prof.auxiliary_outputs else []
         
         # Return pretty-printed JSON
