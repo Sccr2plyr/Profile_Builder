@@ -56,7 +56,7 @@ from tkinter import filedialog, messagebox
 
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
-from ttkbootstrap.scrolled import ScrolledFrame
+from ttkbootstrap.widgets import ScrolledFrame
 
 # ----------------------------
 # Matplotlib Imports (for waveform visualization)
@@ -1980,15 +1980,25 @@ class ProfileBuilderApp(tb.Window):
 
     def _on_closing(self):
         """
-        Handle window close event - saves theme preference.
+        Handle window close event - saves theme preference and exits cleanly.
         """
         import os
+        
+        # Stop any running background processes
+        if self._pico_is_running:
+            self._pico_is_running = False
+            self._pico_is_paused = False
+        
+        # Save theme preference
         try:
             theme_file = os.path.join(os.path.dirname(__file__), ".theme_preference")
             with open(theme_file, "w") as f:
                 f.write(self.style.theme.name)
         except:
             pass
+        
+        # Destroy the window and quit the application
+        self.quit()
         self.destroy()
 
 
