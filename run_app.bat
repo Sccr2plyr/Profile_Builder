@@ -10,4 +10,5 @@ if exist ".venv\Scripts\python.exe" (
     python app.py
 )
 
-pause
+REM Only pause if there was an error
+if errorlevel 1 pause
