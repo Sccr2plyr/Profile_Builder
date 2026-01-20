@@ -152,10 +152,24 @@ class ProfileBuilderApp(tb.Window):
         5. Loads a starter example for demonstration
         6. Generates initial preview
         """
+        # Load saved theme preference or use default
+        import os
+        theme_file = os.path.join(os.path.dirname(__file__), ".theme_preference")
+        saved_theme = "flatly"
+        if os.path.exists(theme_file):
+            try:
+                with open(theme_file, "r") as f:
+                    saved_theme = f.read().strip() or "flatly"
+            except:
+                pass
+        
         # Initialize the themed window
-        super().__init__(themename="flatly")
+        super().__init__(themename=saved_theme)
         self.title("Position Profile Builder")
         self.geometry("1450x900")
+        
+        # Save theme on close
+        self.protocol("WM_DELETE_WINDOW", self._on_closing)
         
         # ----------------------------
         # Position Configuration
