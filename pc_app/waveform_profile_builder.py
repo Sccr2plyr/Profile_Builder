@@ -56,7 +56,7 @@ from tkinter import filedialog, messagebox
 
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
-from ttkbootstrap.widgets import ScrolledFrame
+from ttkbootstrap.widgets.scrolled import ScrolledFrame
 
 # ----------------------------
 # Matplotlib Imports (for waveform visualization)
@@ -168,6 +168,16 @@ class ProfileBuilderApp(tb.Window):
         self.title("Position Profile Builder")
         self.geometry("1450x900")
         
+        # Override error reporting to suppress harmless cleanup errors
+        self.report_callback_exception = self._suppress_callback_errors
+        
+        # Override Tcl's bgerror handler to suppress cleanup errors
+        self.tk.eval('''
+            proc bgerror {message} {
+                # Silently ignore errors during application shutdown
+            }
+        ''')
+        
         # Save theme on close
         self.protocol("WM_DELETE_WINDOW", self._on_closing)
         
@@ -249,6 +259,8 @@ class ProfileBuilderApp(tb.Window):
         self._pico_run_thread: Optional[threading.Thread] = None  # Execution thread
         self._pico_is_running = False                         # Execution state
         self._pico_is_paused = False                          # Pause state
+        self._is_closing = False                              # Flag to prevent after() callbacks on destroyed window
+        self._after_ids = []                                  # Track all after() callback IDs for cleanup
         
         # ----------------------------
         # Build GUI and Initialize
@@ -269,6 +281,23 @@ class ProfileBuilderApp(tb.Window):
         
         # Generate initial preview
         self._rebuild_and_preview()
+
+    def _suppress_callback_errors(self, exc_type, exc_value, exc_traceback):
+        """
+        Suppress harmless Tkinter callback errors during window closing.
+        
+        This prevents bgerror messages like "can't invoke 'event' command:
+        application has been destroyed" from appearing in the console when
+        the window is closed. These errors are harmless and occur when
+        background Tk events try to fire after the application is destroyed.
+        """
+        # If we're closing, suppress all errors
+        if getattr(self, '_is_closing', False):
+            return
+        
+        # Otherwise, log the error normally
+        import traceback
+        traceback.print_exception(exc_type, exc_value, exc_traceback)
 
     def _build_layout(self):
         """
@@ -900,6 +929,10 @@ class ProfileBuilderApp(tb.Window):
         1. Updates available events in all schedule comboboxes
         2. Rebuilds waveform preview
         """
+        # Return immediately if window is closing
+        if getattr(self, '_is_closing', False):
+            return
+            
         # Update event lists in all schedule rows
         self._update_event_lists()
         
@@ -1092,6 +1125,10 @@ class ProfileBuilderApp(tb.Window):
         """
         Update current block label and trigger preview rebuild when name or cycles changes.
         """
+        # Return immediately if window is closing
+        if getattr(self, '_is_closing', False):
+            return
+            
         # Update current block label if needed
         if 0 <= self.current_block_index < len(self.blocks):
             name_var, cycles_var, _, _ = self.blocks[self.current_block_index]
@@ -1256,6 +1293,10 @@ class ProfileBuilderApp(tb.Window):
             This method is called frequently, so it must be fast.
             All heavy computation is done in the waveform_engine module.
         """
+        # Return immediately if window is closing (prevents bgerror from event handlers)
+        if getattr(self, '_is_closing', False):
+            return
+            
         # Clear the previous plot
         self.ax.clear()
         self.ax.grid(True)
@@ -1851,7 +1892,8 @@ class ProfileBuilderApp(tb.Window):
             self._pico_run_thread.start()
             
             # Start polling the queue for completion
-            self.after(50, self._poll_pico_queue)
+            after_id = self.after(50, self._poll_pico_queue)
+            self._after_ids.append(after_id)
 
         except Exception as e:
             messagebox.showerror("Pico Run Error", str(e))
@@ -1877,6 +1919,10 @@ class ProfileBuilderApp(tb.Window):
         This polling mechanism keeps the GUI responsive while allowing
         background tasks to communicate results safely.
         """
+        # Return immediately if window is closing
+        if self._is_closing:
+            return
+            
         try:
             # Check for messages (non-blocking)
             while True:
@@ -1896,10 +1942,18 @@ class ProfileBuilderApp(tb.Window):
                         messagebox.showerror("Pico Run Error", msg)
         except queue.Empty:
             pass  # No messages yet
+        except (tk.TclError, RuntimeError):
+            # Window is being destroyed, stop polling
+            return
 
-        # Continue polling if thread is still alive
-        if self._pico_run_thread and self._pico_run_thread.is_alive():
-            self.after(50, self._poll_pico_queue)
+        # Continue polling if thread is still alive and window is not closing
+        if not self._is_closing and self._pico_run_thread and self._pico_run_thread.is_alive():
+            try:
+                after_id = self.after(50, self._poll_pico_queue)
+                self._after_ids.append(after_id)
+            except (tk.TclError, RuntimeError):
+                # Window already destroyed, ignore
+                pass
 
     def _pico_pause(self):
         """
@@ -1984,10 +2038,45 @@ class ProfileBuilderApp(tb.Window):
         """
         import os
         
+        # Set closing flag to prevent any pending after() callbacks
+        self._is_closing = True
+        
+        # Cancel all pending after() callbacks
+        for after_id in self._after_ids:
+            try:
+                self.after_cancel(after_id)
+            except:
+                pass
+        self._after_ids.clear()
+        
+        # Withdraw window immediately to prevent any further user interaction or events
+        try:
+            self.withdraw()
+        except:
+            pass
+        
         # Stop any running background processes
         if self._pico_is_running:
             self._pico_is_running = False
             self._pico_is_paused = False
+            # Wait for background thread to finish
+            if self._pico_run_thread and self._pico_run_thread.is_alive():
+                self._pico_run_thread.join(timeout=0.5)
+        
+        # Clean up matplotlib canvas to stop any background events
+        try:
+            if hasattr(self, 'canvas') and self.canvas:
+                # Stop matplotlib animation/idle events
+                self.canvas.mpl_disconnect('all')
+                self.canvas.flush_events()
+                self.canvas.get_tk_widget().destroy()
+                self.canvas = None
+            if hasattr(self, 'fig') and self.fig:
+                import matplotlib.pyplot as plt
+                plt.close(self.fig)
+                self.fig = None
+        except:
+            pass
         
         # Save theme preference
         try:
@@ -1997,18 +2086,20 @@ class ProfileBuilderApp(tb.Window):
         except:
             pass
         
-        # Destroy the window and quit the application
-        self.quit()
-        self.destroy()
+        # Destroy the window (this also exits mainloop)
+        try:
+            self.destroy()
+        except:
+            pass
 
 
 # ================================
 # Application Entry Point
 # ================================
 
-if __name__ == "__main__":
+def main():
     """
-    Main entry point for the Profile Builder application.
+    Entry point for the Profile Builder application.
     
     This creates and runs the main application window.
     The application uses ttkbootstrap's themed window and runs
@@ -2022,17 +2113,6 @@ if __name__ == "__main__":
         - ttkbootstrap
         - matplotlib
         - pyserial (optional, for Pico communication)
-    """
-    app = ProfileBuilderApp()
-    app.mainloop()
-
-
-def main():
-    """
-    Entry point for console script.
-    
-    This function is called when running 'profile-builder' from command line
-    after installation via pip.
     """
     app = ProfileBuilderApp()
     app.mainloop()
