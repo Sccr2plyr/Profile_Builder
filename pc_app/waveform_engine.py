@@ -300,9 +300,11 @@ def build_waveforms_from_schedule(
     base_boundaries: List[float] = [0.0]  # Always include t=0
     
     for ev in schedule:
-        # Validate event type
+        # Validate event type (allow auxiliary events ending with " On" or " Off")
         if ev.event not in EVENTS:
-            raise ValueError(f"Unknown event '{ev.event}'")
+            # Check if this is an auxiliary event
+            if not (ev.event.endswith(" On") or ev.event.endswith(" Off")):
+                raise ValueError(f"Unknown event '{ev.event}'")
         
         # Validate timing parameters
         if ev.start < 0:
