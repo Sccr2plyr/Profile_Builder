@@ -176,6 +176,40 @@ class Block:
 
 
 @dataclass
+class AuxiliaryOutput:
+    """
+    Configuration for an auxiliary GPIO output.
+    
+    Auxiliary outputs are user-defined GPIO pins that can be controlled independently
+    of test positions. Common uses include:
+        - Power supply control (multiple supplies with make-break sequencing)
+        - Relay control
+        - Valve control
+        - LED indicators
+        - Any other GPIO-controlled device
+    
+    Each auxiliary output automatically generates two event types:
+        - "{name} On" - Sets the GPIO HIGH
+        - "{name} Off" - Sets the GPIO LOW
+    
+    These events can then be scheduled in the waveform timeline like any other event.
+    
+    Attributes:
+        name (str): Human-readable name for this output (e.g., "Power Supply 1", "Relay A")
+                   Used to generate event names ("{name} On", "{name} Off")
+        gpio (int): GPIO pin number controlling this output
+        enabled (bool): Whether this output is active (disabled outputs don't generate events)
+    
+    Example:
+        >>> aux = AuxiliaryOutput(name="Power Supply 1", gpio=15, enabled=True)
+        # This generates events: "Power Supply 1 On" and "Power Supply 1 Off"
+    """
+    name: str
+    gpio: int
+    enabled: bool = True
+
+
+@dataclass
 class Profile:
     """
     Complete test profile containing all configuration and waveform data.
@@ -205,6 +239,10 @@ class Profile:
         row_delay_ms (float): Delay in milliseconds between starting each position
                               (allows sequential activation of positions)
         positions (List[PositionConfig]): Configuration for all test positions
+        auxiliary_outputs (List[AuxiliaryOutput]): Configuration for auxiliary GPIO outputs
+                                                   (power supplies, relays, etc.)
+        auxiliary_waveforms (dict): Precomputed auxiliary waveforms as dict of 
+                                   {output_name: [(time_ms, state), ...]}
     
     Example:
         >>> profile = Profile(
@@ -218,7 +256,15 @@ class Profile:
         ...     isolator_waveform_points=[(0.0, 0), (10.0, 1), ...],
         ...     dut_waveform_points=[(0.0, 0), (20.0, 1), ...],
         ...     row_delay_ms=50.0,
-        ...     positions=[...]
+        ...     positions=[...],
+        ...     auxiliary_outputs=[
+        ...         AuxiliaryOutput("Power Supply 1", 15, True),
+        ...         AuxiliaryOutput("Power Supply 2", 16, True)
+        ...     ],
+        ...     auxiliary_waveforms={
+        ...         "Power Supply 1": [(0, 0), (100, 1), ...],
+        ...         "Power Supply 2": [(150, 0), (200, 1), ...]
+        ...     }
         ... )
     """
     profile_name: str
@@ -228,3 +274,12 @@ class Profile:
     dut_waveform_points: List[Tuple[float, int]]
     row_delay_ms: float
     positions: List[PositionConfig]
+    auxiliary_outputs: List[AuxiliaryOutput] = None  # Optional for backward compatibility
+    auxiliary_waveforms: dict = None  # Optional for backward compatibility
+    
+    def __post_init__(self):
+        """Initialize optional fields with defaults if not provided."""
+        if self.auxiliary_outputs is None:
+            self.auxiliary_outputs = []
+        if self.auxiliary_waveforms is None:
+            self.auxiliary_waveforms = {}

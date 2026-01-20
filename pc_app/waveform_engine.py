@@ -387,9 +387,99 @@ def build_waveforms_from_schedule(
     return iso_digital, dut_digital, iso_display, dut_display, iso_has_ramps, dut_has_ramps, cycle_length_ms
 
 
+def build_auxiliary_waveforms(
+    schedule: List[ScheduledEvent],
+    auxiliary_outputs: List,  # List[AuxiliaryOutput] from models
+    unit: str,
+    cycles: int
+) -> Dict[str, List[Tuple[float, int]]]:
+    """
+    Generate waveforms for auxiliary GPIO outputs.
+    
+    Auxiliary outputs are user-defined GPIO pins (power supplies, relays, etc.)
+    that can be controlled via schedule events. Each auxiliary output generates
+    two event types: "{name} On" and "{name} Off".
+    
+    This function:
+    1. Identifies all events for each auxiliary output
+    2. Builds steady-state blocks where output should be HIGH
+    3. Generates digital step waveform for each output
+    4. Repeats for the specified number of cycles
+    
+    Args:
+        schedule (List[ScheduledEvent]): Scheduled events for one cycle
+        auxiliary_outputs (List[AuxiliaryOutput]): List of auxiliary output configurations
+        unit (str): Time unit for event times ("ms", "sec", or "min")
+        cycles (int): Number of times to repeat the waveform
+    
+    Returns:
+        Dict[str, List[Tuple[float, int]]]: Dictionary mapping output names to
+                                            their digital waveforms as (time_ms, state) tuples
+    
+    Example:
+        >>> from models import AuxiliaryOutput
+        >>> aux_outputs = [AuxiliaryOutput("Power Supply 1", 15, True)]
+        >>> schedule = [
+        ...     ScheduledEvent("Power Supply 1 On", 0.0, 100.0),
+        ...     ScheduledEvent("Power Supply 1 Off", 150.0, 50.0)
+        ... ]
+        >>> waveforms = build_auxiliary_waveforms(schedule, aux_outputs, "ms", 1)
+        >>> waveforms["Power Supply 1"]
+        [(0.0, 0), (0.0, 1), (100.0, 0), (150.0, 0), (200.0, 0)]
+    """
+    aux_waveforms: Dict[str, List[Tuple[float, int]]] = {}
+    
+    # Get total cycle length from schedule
+    if not schedule:
+        return aux_waveforms
+    
+    max_end_ms = max(to_ms(ev.start + ev.duration, unit) for ev in schedule)
+    cycle_length_ms = max_end_ms if max_end_ms > 0 else 1.0
+    
+    # Process each auxiliary output
+    for aux_output in auxiliary_outputs:
+        if not aux_output.enabled:
+            continue
+        
+        output_name = aux_output.name
+        on_event = f"{output_name} On"
+        off_event = f"{output_name} Off"
+        
+        # Build steady-state blocks for this output (HIGH periods)
+        steady_blocks: List[Tuple[float, float, int]] = []
+        boundaries: List[float] = [0.0]
+        
+        for ev in schedule:
+            if ev.event == on_event or ev.event == off_event:
+                s_ms = to_ms(ev.start, unit)
+                e_ms = to_ms(ev.start + ev.duration, unit)
+                boundaries.extend([s_ms, e_ms])
+                
+                # ON events create HIGH blocks
+                if ev.event == on_event:
+                    steady_blocks.append((s_ms, e_ms, 1))
+        
+        # Build single-cycle waveform
+        single_cycle = build_digital_step_waveform(steady_blocks, boundaries)
+        
+        # Repeat for multiple cycles
+        if cycles <= 1:
+            aux_waveforms[output_name] = single_cycle
+        else:
+            repeated_waveform: List[Tuple[float, int]] = []
+            for cycle_idx in range(cycles):
+                offset = cycle_idx * cycle_length_ms
+                for t, state in single_cycle:
+                    repeated_waveform.append((t + offset, state))
+            aux_waveforms[output_name] = normalize_step_points(repeated_waveform)
+    
+    return aux_waveforms
+
+
 def build_waveforms_from_blocks(
     blocks: List[Block],
     unit: str,
+    auxiliary_outputs: List = None,  # List[AuxiliaryOutput], optional for backward compatibility
 ) -> Tuple[
     List[Tuple[float, int]],     # Isolator digital waveform (all blocks combined)
     List[Tuple[float, int]],     # DUT digital waveform (all blocks combined)
@@ -399,6 +489,7 @@ def build_waveforms_from_blocks(
     bool,                         # True if DUT has ramp events
     float,                        # Total length of all blocks in milliseconds
     List[float],                  # List of block end times for visualization
+    Dict[str, List[Tuple[float, int]]],  # Auxiliary waveforms dict {name: [(time, state), ...]}
 ]:
     """
     Generate complete waveforms from a sequence of blocks.
@@ -418,10 +509,13 @@ def build_waveforms_from_blocks(
     3. Applies time offsets to concatenate blocks
     4. Combines all block waveforms into single continuous waveforms
     5. Tracks block boundaries for visualization
+    6. Generates auxiliary output waveforms if provided
     
     Args:
         blocks (List[Block]): Ordered list of blocks to execute sequentially
         unit (str): Time unit for event times ("ms", "sec", or "min")
+        auxiliary_outputs (List[AuxiliaryOutput], optional): List of auxiliary GPIO
+                                                             output configurations
     
     Returns:
         Tuple containing:
@@ -433,25 +527,27 @@ def build_waveforms_from_blocks(
             - Boolean indicating if DUT has any ramp events
             - Total length in milliseconds (sum of all block lengths)
             - List of block end times (for marking boundaries in visualization)
+            - Dictionary of auxiliary waveforms {output_name: [(time, state), ...]}
     
     Raises:
         ValueError: If blocks list is empty, or if any block is invalid
     
     Example:
+        >>> from models import AuxiliaryOutput
         >>> blocks = [
         ...     Block("Init", [ScheduledEvent("Isolator On", 0.0, 100.0)], cycles=1),
         ...     Block("Main", [ScheduledEvent("Isolator On", 0.0, 50.0), ...], cycles=10),
-        ...     Block("Shutdown", [ScheduledEvent("Isolator On", 0.0, 100.0)], cycles=1)
         ... ]
-        >>> iso_dig, dut_dig, iso_disp, dut_disp, iso_ramps, dut_ramps, total_ms, block_ends = \
-        ...     build_waveforms_from_blocks(blocks, "ms")
-        >>> # block_ends might be [100.0, 600.0, 700.0] if blocks are 100ms, 500ms, 100ms
+        >>> aux = [AuxiliaryOutput("Power Supply 1", 15, True)]
+        >>> iso_dig, dut_dig, iso_disp, dut_disp, iso_ramps, dut_ramps, total_ms, block_ends, aux_waveforms = \
+        ...     build_waveforms_from_blocks(blocks, "ms", aux)
     
     Note:
         - Each block is independent and starts at time 0 internally
         - Time offsets are applied to create continuous timeline
         - Block boundaries are tracked for visualization purposes
         - All blocks share the same time unit
+        - Auxiliary waveforms are built separately and time-shifted to match blocks
     """
     if not blocks:
         raise ValueError("Add at least one block to the profile.")
@@ -461,6 +557,13 @@ def build_waveforms_from_blocks(
     combined_dut_digital: List[Tuple[float, int]] = []
     combined_iso_display: List[Tuple[float, float]] = []
     combined_dut_display: List[Tuple[float, float]] = []
+    
+    # Initialize auxiliary waveforms dictionary
+    combined_aux_waveforms: Dict[str, List[Tuple[float, int]]] = {}
+    if auxiliary_outputs:
+        for aux in auxiliary_outputs:
+            if aux.enabled:
+                combined_aux_waveforms[aux.name] = []
     
     # Track if any block has ramps
     any_iso_ramps = False
@@ -484,6 +587,14 @@ def build_waveforms_from_blocks(
         iso_dig, dut_dig, iso_disp, dut_disp, iso_ramps, dut_ramps, block_length_ms = \
             build_waveforms_from_schedule(block.scheduled_events, unit, block.cycles)
         
+        # Generate auxiliary waveforms for this block
+        if auxiliary_outputs:
+            aux_waveforms = build_auxiliary_waveforms(
+                block.scheduled_events, auxiliary_outputs, unit, block.cycles
+            )
+        else:
+            aux_waveforms = {}
+        
         # Track if we have any ramps across all blocks
         any_iso_ramps = any_iso_ramps or iso_ramps
         any_dut_ramps = any_dut_ramps or dut_ramps
@@ -497,12 +608,21 @@ def build_waveforms_from_blocks(
             # Offset display waveforms
             iso_disp = [(t + current_time_offset, v) for t, v in iso_disp]
             dut_disp = [(t + current_time_offset, v) for t, v in dut_disp]
+            
+            # Offset auxiliary waveforms
+            for aux_name, aux_wave in aux_waveforms.items():
+                aux_waveforms[aux_name] = [(t + current_time_offset, s) for t, s in aux_wave]
         
         # Append to combined waveforms
         combined_iso_digital.extend(iso_dig)
         combined_dut_digital.extend(dut_dig)
         combined_iso_display.extend(iso_disp)
         combined_dut_display.extend(dut_disp)
+        
+        # Append auxiliary waveforms
+        for aux_name, aux_wave in aux_waveforms.items():
+            if aux_name in combined_aux_waveforms:
+                combined_aux_waveforms[aux_name].extend(aux_wave)
         
         # Update time offset for next block
         current_time_offset += block_length_ms
@@ -516,13 +636,18 @@ def build_waveforms_from_blocks(
     combined_iso_display = merge_duplicate_times_keep_last(combined_iso_display)
     combined_dut_display = merge_duplicate_times_keep_last(combined_dut_display)
     
+    # Normalize auxiliary waveforms
+    for aux_name in combined_aux_waveforms:
+        combined_aux_waveforms[aux_name] = normalize_step_points(combined_aux_waveforms[aux_name])
+    
     # Total length is the final time offset
     total_length_ms = current_time_offset
     
     return (combined_iso_digital, combined_dut_digital,
             combined_iso_display, combined_dut_display,
             any_iso_ramps, any_dut_ramps,
-            total_length_ms, block_end_times)
+            total_length_ms, block_end_times,
+            combined_aux_waveforms)
 
 
 # ----------------------------

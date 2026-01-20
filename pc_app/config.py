@@ -11,6 +11,13 @@ DEFAULT_NUM_POSITIONS = 10
 DEFAULT_ISOLATOR_GPIO_START = 1  # Isolator pins: 1-10
 DEFAULT_DUT_GPIO_START = 21      # DUT pins: 21-30
 
+# Auxiliary output defaults
+DEFAULT_AUXILIARY_GPIO_START = 15  # Auxiliary pins start at 15
+DEFAULT_AUXILIARY_OUTPUTS = [
+    ("Power Supply 1", 15),
+    ("Power Supply 2", 16),
+]
+
 # Serial communication defaults
 DEFAULT_COM_PORT_LINUX = "/dev/ttyACM0"
 DEFAULT_COM_PORT_WINDOWS = "COM3"
