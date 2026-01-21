@@ -278,7 +278,7 @@ def build_waveforms_from_schedule(
     Example:
         >>> schedule = [
         ...     ScheduledEvent("Isolator On", 0.0, 100.0),
-        ...     ScheduledEvent("DUT Hold Time", 20.0, 60.0),
+        ...     ScheduledEvent("DUT On Time", 20.0, 60.0),
         ...     ScheduledEvent("Cycle Delay", 100.0, 50.0)
         ... ]
         >>> iso_dig, dut_dig, iso_disp, dut_disp, iso_ramps, dut_ramps, cycle_ms = \
@@ -404,9 +404,10 @@ def build_auxiliary_waveforms(
     
     This function:
     1. Identifies all events for each auxiliary output
-    2. Builds steady-state blocks where output should be HIGH
-    3. Generates digital step waveform for each output
-    4. Repeats for the specified number of cycles
+    2. If output has always_on=True, generates HIGH waveform for entire test
+    3. Otherwise, builds steady-state blocks where output should be HIGH
+    4. Generates digital step waveform for each output
+    5. Repeats for the specified number of cycles
     
     Args:
         schedule (List[ScheduledEvent]): Scheduled events for one cycle
@@ -420,7 +421,7 @@ def build_auxiliary_waveforms(
     
     Example:
         >>> from models import AuxiliaryOutput
-        >>> aux_outputs = [AuxiliaryOutput("Power Supply 1", 15, True)]
+        >>> aux_outputs = [AuxiliaryOutput("Power Supply 1", 15, True, False)]
         >>> schedule = [
         ...     ScheduledEvent("Power Supply 1 On", 0.0, 100.0),
         ...     ScheduledEvent("Power Supply 1 Off", 150.0, 50.0)
@@ -437,6 +438,7 @@ def build_auxiliary_waveforms(
     
     max_end_ms = max(to_ms(ev.start + ev.duration, unit) for ev in schedule)
     cycle_length_ms = max_end_ms if max_end_ms > 0 else 1.0
+    total_length_ms = cycle_length_ms * cycles
     
     # Process each auxiliary output
     for aux_output in auxiliary_outputs:
@@ -444,6 +446,16 @@ def build_auxiliary_waveforms(
             continue
         
         output_name = aux_output.name
+        
+        # Handle always_on mode - output stays HIGH for entire test
+        if getattr(aux_output, 'always_on', False):
+            aux_waveforms[output_name] = [
+                (0.0, 1),  # Turn on at start
+                (total_length_ms, 1)  # Stay on until end
+            ]
+            continue
+        
+        # Normal mode - build waveform from scheduled events
         on_event = f"{output_name} On"
         off_event = f"{output_name} Off"
         

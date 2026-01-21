@@ -100,7 +100,7 @@ class TestProfile:
     def test_profile_with_multiple_blocks(self):
         """Test profile with multiple blocks."""
         block1 = Block("Init", [ScheduledEvent("Isolator On", 0, 100)], 1)
-        block2 = Block("Main", [ScheduledEvent("DUT Hold Time", 0, 200)], 10)
+        block2 = Block("Main", [ScheduledEvent("DUT On Time", 0, 200)], 10)
         block3 = Block("Shutdown", [ScheduledEvent("Isolator Off", 0, 50)], 1)
         
         positions = [PositionConfig(1, True, 1, 21, 0.0)]

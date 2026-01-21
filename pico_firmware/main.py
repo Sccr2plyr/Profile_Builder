@@ -118,6 +118,8 @@ def _build_events(profile):
         raise ValueError("No positions enabled")
 
     events = []  # (t_ms, gpio, state)
+    
+    # Add position-specific events (isolator and DUT)
     for idx, p in enumerate(enabled):
         base_shift = idx * row_delay_ms
         dut_offset = int(round(float(p.get("dut_offset_ms", 0.0))))
@@ -128,6 +130,29 @@ def _build_events(profile):
             events.append((t + base_shift, iso_gpio, s))
         for t, s in dut_pts:
             events.append((t + base_shift + dut_offset, dut_gpio, s))
+    
+    # Add auxiliary output events (not position-specific, run at their scheduled times)
+    auxiliary_outputs = profile.get("auxiliary_outputs", [])
+    auxiliary_waveforms = profile.get("auxiliary_waveforms", {})
+    
+    for aux in auxiliary_outputs:
+        if not isinstance(aux, dict):
+            continue
+        if not aux.get("enabled", False):
+            continue
+        
+        aux_name = aux.get("name", "")
+        aux_gpio = aux.get("gpio")
+        
+        if not aux_name or aux_gpio is None:
+            continue
+        
+        # Get the waveform points for this auxiliary output
+        aux_waveform = auxiliary_waveforms.get(aux_name, [])
+        if aux_waveform:
+            aux_pts = _clean_points(aux_waveform)
+            for t, s in aux_pts:
+                events.append((t, int(aux_gpio), s))
 
     events.sort()  # no-arg sort
     return events

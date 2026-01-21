@@ -3,7 +3,7 @@
   "waveform_time_units": "ms",
   "scheduled_events": [
     {"event": "Isolator On", "start": 0, "duration": 300},
-    {"event": "DUT Hold Time", "start": 80, "duration": 200},
+    {"event": "DUT On Time", "start": 80, "duration": 200},
     {"event": "DUT Off Time", "start": 280, "duration": 120},
     {"event": "Cycle Delay", "start": 400, "duration": 200}
   ],

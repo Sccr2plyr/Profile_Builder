@@ -79,7 +79,7 @@ class TestBuildWaveformsFromBlocks:
     def test_multiple_blocks_sequential(self):
         """Test that multiple blocks execute sequentially."""
         block1 = Block("Block1", [ScheduledEvent("Isolator On", 0.0, 100.0)], 1)
-        block2 = Block("Block2", [ScheduledEvent("DUT Hold Time", 0.0, 50.0)], 1)
+        block2 = Block("Block2", [ScheduledEvent("DUT On Time", 0.0, 50.0)], 1)
         
         iso_dig, dut_dig, _, _, _, _, total_len, block_ends = \
             build_waveforms_from_blocks([block1, block2], "ms")

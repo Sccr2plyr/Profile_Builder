@@ -43,7 +43,7 @@ UNIT_TO_MS = {
 EVENT_TYPES = [
     "Isolator On",
     "Isolator Off",
-    "DUT Hold Time",
+    "DUT ON Time",
     "DUT Off Time",
     "Cycle Delay",
 ]
@@ -51,7 +51,7 @@ EVENT_TYPES = [
 # Event rise/fall times (milliseconds)
 ISOLATOR_ON_RISE_MS = 5.0
 ISOLATOR_OFF_FALL_MS = 3.0
-DUT_HOLD_RISE_MS = 2.0
+DUT_ON_RISE_MS = 2.0
 DUT_OFF_FALL_MS = 2.0
 
 # ===========================

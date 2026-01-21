@@ -242,8 +242,8 @@ class ProfileBuilderApp(tb.Window):
         # ----------------------------
         # Auxiliary Outputs Configuration
         # ----------------------------
-        # List of auxiliary outputs: (name_var, gpio_var, enabled_var, frame)
-        self.auxiliary_outputs: List[Tuple[tk.StringVar, tk.IntVar, tk.BooleanVar, tb.Frame]] = []
+        # List of auxiliary outputs: (name_var, gpio_var, enabled_var, always_on_var, frame)
+        self.auxiliary_outputs: List[Tuple[tk.StringVar, tk.IntVar, tk.BooleanVar, tk.BooleanVar, tb.Frame]] = []
         
         # ----------------------------
         # Pico Serial Communication
@@ -275,7 +275,7 @@ class ProfileBuilderApp(tb.Window):
         
         # Add starter events to the first block
         self._add_schedule_row("Isolator On", 0, 300)
-        self._add_schedule_row("DUT Hold Time", 80, 200)
+        self._add_schedule_row("DUT On Time", 80, 200)
         self._add_schedule_row("DUT Off Time", 280, 120)
         self._add_schedule_row("Cycle Delay", 400, 200)
         
@@ -510,8 +510,9 @@ class ProfileBuilderApp(tb.Window):
         aux_header = tb.Frame(aux_box)
         aux_header.pack(fill=X, pady=(0, 4))
         tb.Label(aux_header, text="Enabled", width=8).pack(side=LEFT)
-        tb.Label(aux_header, text="Name", width=20).pack(side=LEFT)
-        tb.Label(aux_header, text="GPIO", width=8).pack(side=LEFT)
+        tb.Label(aux_header, text="Name", width=18).pack(side=LEFT)
+        tb.Label(aux_header, text="GPIO", width=6).pack(side=LEFT)
+        tb.Label(aux_header, text="Always On", width=9).pack(side=LEFT)
         
         # Scrollable container for auxiliary output rows
         self.aux_scroll = ScrolledFrame(aux_box, autohide=True, height=100)
@@ -823,15 +824,15 @@ class ProfileBuilderApp(tb.Window):
         from config import DEFAULT_AUXILIARY_OUTPUTS
         
         # Clear any existing auxiliary widgets
-        for _name_var, _gpio_var, _enabled_var, frame in self.auxiliary_outputs:
+        for _name_var, _gpio_var, _enabled_var, _always_on_var, frame in self.auxiliary_outputs:
             frame.destroy()
         self.auxiliary_outputs.clear()
         
         # Add default auxiliary outputs
         for name, gpio in DEFAULT_AUXILIARY_OUTPUTS:
-            self._add_auxiliary_output(name=name, gpio=gpio, enabled=True)
+            self._add_auxiliary_output(name=name, gpio=gpio, enabled=True, always_on=False)
 
-    def _add_auxiliary_output(self, name: str = None, gpio: int = None, enabled: bool = True):
+    def _add_auxiliary_output(self, name: str = None, gpio: int = None, enabled: bool = True, always_on: bool = False):
         """
         Add a new auxiliary output row to the configuration.
         
@@ -839,13 +840,16 @@ class ProfileBuilderApp(tb.Window):
             name (str, optional): Name of the output. Defaults to "Aux N"
             gpio (int, optional): GPIO pin number. Defaults to next available
             enabled (bool, optional): Whether output is enabled. Defaults to True
+            always_on (bool, optional): Whether output stays on entire test. Defaults to False
         
         Creates a row with:
         - Enable checkbox
         - Name entry
         - GPIO entry
+        - Always On checkbox
         
         Each output generates two events: "{Name} On" and "{Name} Off"
+        If always_on is True, output stays HIGH for entire test duration.
         """
         from config import DEFAULT_AUXILIARY_GPIO_START
         
@@ -861,6 +865,7 @@ class ProfileBuilderApp(tb.Window):
         name_var = tk.StringVar(value=name)
         gpio_var = tk.IntVar(value=gpio)
         enabled_var = tk.BooleanVar(value=enabled)
+        always_on_var = tk.BooleanVar(value=always_on)
         
         # Create row frame
         row = tb.Frame(self.aux_container)
@@ -870,19 +875,22 @@ class ProfileBuilderApp(tb.Window):
         tb.Checkbutton(row, variable=enabled_var, command=self._on_auxiliary_changed, width=8).pack(side=LEFT)
         
         # Name entry
-        name_entry = tb.Entry(row, textvariable=name_var, width=20)
+        name_entry = tb.Entry(row, textvariable=name_var, width=18)
         name_entry.pack(side=LEFT, padx=(0, 5))
         name_entry.bind("<FocusOut>", lambda _e: self._on_auxiliary_changed())
         name_entry.bind("<Return>", lambda _e: self._on_auxiliary_changed())
         
         # GPIO entry
-        gpio_entry = tb.Entry(row, textvariable=gpio_var, width=8)
-        gpio_entry.pack(side=LEFT)
+        gpio_entry = tb.Entry(row, textvariable=gpio_var, width=6)
+        gpio_entry.pack(side=LEFT, padx=(0, 5))
         gpio_entry.bind("<FocusOut>", lambda _e: self._on_auxiliary_changed())
         gpio_entry.bind("<Return>", lambda _e: self._on_auxiliary_changed())
         
+        # Always On checkbox
+        tb.Checkbutton(row, variable=always_on_var, command=self._on_auxiliary_changed, width=9).pack(side=LEFT)
+        
         # Store row data
-        self.auxiliary_outputs.append((name_var, gpio_var, enabled_var, row))
+        self.auxiliary_outputs.append((name_var, gpio_var, enabled_var, always_on_var, row))
         
         # Update available events
         self._on_auxiliary_changed()
@@ -895,7 +903,7 @@ class ProfileBuilderApp(tb.Window):
             return
         
         # Get and remove last row
-        _name_var, _gpio_var, _enabled_var, frame = self.auxiliary_outputs.pop()
+        _name_var, _gpio_var, _enabled_var, _always_on_var, frame = self.auxiliary_outputs.pop()
         frame.destroy()
         
         # Update available events
@@ -911,12 +919,13 @@ class ProfileBuilderApp(tb.Window):
         from models import AuxiliaryOutput
         
         outputs = []
-        for name_var, gpio_var, enabled_var, _frame in self.auxiliary_outputs:
+        for name_var, gpio_var, enabled_var, always_on_var, _frame in self.auxiliary_outputs:
             outputs.append(
                 AuxiliaryOutput(
                     name=name_var.get().strip(),
                     gpio=int(gpio_var.get()),
-                    enabled=bool(enabled_var.get())
+                    enabled=bool(enabled_var.get()),
+                    always_on=bool(always_on_var.get())
                 )
             )
         return outputs
@@ -949,9 +958,9 @@ class ProfileBuilderApp(tb.Window):
         # Get base events
         events = list(EVENTS)
         
-        # Add auxiliary events
-        for name_var, _gpio_var, enabled_var, _frame in self.auxiliary_outputs:
-            if enabled_var.get():
+        # Add auxiliary events (only for outputs that are not always_on)
+        for name_var, _gpio_var, enabled_var, always_on_var, _frame in self.auxiliary_outputs:
+            if enabled_var.get() and not always_on_var.get():
                 name = name_var.get().strip()
                 if name:
                     events.append(f"{name} On")
@@ -975,9 +984,9 @@ class ProfileBuilderApp(tb.Window):
         # Start with base events
         events = list(EVENTS)
         
-        # Add auxiliary events for enabled outputs
-        for name_var, _gpio_var, enabled_var, _frame in self.auxiliary_outputs:
-            if enabled_var.get():
+        # Add auxiliary events for enabled outputs (only for outputs that are not always_on)
+        for name_var, _gpio_var, enabled_var, always_on_var, _frame in self.auxiliary_outputs:
+            if enabled_var.get() and not always_on_var.get():
                 name = name_var.get().strip()
                 if name:
                     events.append(f"{name} On")

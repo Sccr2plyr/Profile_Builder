@@ -59,7 +59,7 @@ Isolator On              0        300
 Power Supply 1 On        50       0
 Power Supply 1 Off       280      0
 Power Supply 2 On        285      0
-DUT Hold Time            80       200
+DUT On Time              80       200
 DUT Off Time             280      120
 Power Supply 2 Off       400      0
 Cycle Delay              400      200

@@ -39,11 +39,11 @@ EVENTS = [
     "Isolator On",         # Steady-state isolator HIGH period
     "Isolator Rise Time",  # Isolator transition from LOW to HIGH (displayed as ramp)
     "Isolator Fall Time",  # Isolator transition from HIGH to LOW (displayed as ramp)
-    "DUT Hold Time",       # Steady-state DUT HIGH period
-    "DUT Rise Time",       # DUT transition from LOW to HIGH (displayed as ramp)
-    "DUT Fall Time",       # DUT transition from HIGH to LOW (displayed as ramp)
     "Isolator Off Time",   # Steady-state isolator LOW period
+    "DUT On Time",         # Steady-state DUT HIGH period
+    "DUT Rise Time",       # DUT transition from LOW to HIGH (displayed as ramp)
     "DUT Off Time",        # Steady-state DUT LOW period
+    "DUT Fall Time",       # DUT transition from HIGH to LOW (displayed as ramp)
     "Cycle Delay",         # Delay between cycles (isolator and DUT both LOW)
 ]
 
@@ -61,7 +61,7 @@ ISO_ON_STEADY = {"Isolator On"}
 ISO_OFF_STEADY = {"Isolator Off Time", "Cycle Delay"}
 
 # DUT signal is HIGH (steady state) during these events
-DUT_ON_STEADY = {"DUT Hold Time"}
+DUT_ON_STEADY = {"DUT On Time"}
 
 # DUT signal is LOW (steady state) during these events
 DUT_OFF_STEADY = {"DUT Off Time", "Cycle Delay"}
@@ -199,14 +199,17 @@ class AuxiliaryOutput:
                    Used to generate event names ("{name} On", "{name} Off")
         gpio (int): GPIO pin number controlling this output
         enabled (bool): Whether this output is active (disabled outputs don't generate events)
+        always_on (bool): If True, output stays HIGH for entire test duration, ignoring scheduled events.
+                         Useful for power supplies that must remain on throughout the test.
     
     Example:
-        >>> aux = AuxiliaryOutput(name="Power Supply 1", gpio=15, enabled=True)
-        # This generates events: "Power Supply 1 On" and "Power Supply 1 Off"
+        >>> aux = AuxiliaryOutput(name="Power Supply 1", gpio=15, enabled=True, always_on=True)
+        # This keeps the output HIGH for the entire test duration
     """
     name: str
     gpio: int
     enabled: bool = True
+    always_on: bool = False
 
 
 @dataclass
